@@ -4,13 +4,17 @@
 import openai
 import os
 from datetime import datetime
+import tiktoken
 
 import pynecone as pc
 from pynecone.base import Base
-
+from langchain.llms import OpenAI
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
 
 # openai.api_key = "<YOUR_OPENAI_API_KEY>"
-openai.api_key = open(".key", "r").read().replace("\n","")
+import os
+os.environ["OPENAI_API_KEY"] = open(".key", "r").read().replace("\n","")
 
 
 # parallel_example = {
@@ -30,6 +34,19 @@ openai.api_key = open(".key", "r").read().replace("\n","")
 #     translated_text = response.choices[0].text.strip()
 #     return translated_text
 
+def read_description(file_path: str) -> str:
+    with open(file_path, "r") as f:
+        desc = f.read()
+
+    return desc
+
+def truncate_text(text, max_tokens=3000):
+    enc = tiktoken.encoding_for_model("gpt-3.5-turbo")
+    tokens = enc.encode(text)
+    if len(tokens) <= max_tokens:  # 토큰 수가 이미 3000 이하라면 전체 텍스트 반환
+        return text
+    return enc.decode(tokens[:max_tokens])
+
 
 def translate_text_using_chatgpt(text) -> str:#, src_lang, trg_lang) -> str:
     # fewshot 예제를 만들고
@@ -46,24 +63,41 @@ def translate_text_using_chatgpt(text) -> str:#, src_lang, trg_lang) -> str:
     #     return fewshot_messages
 
     # system instruction 만들고
-    # system_instruction = f"assistant는 번역앱으로서 동작한다. {src_lang}를 {trg_lang}로 적절하게 번역하고 번역된 텍스트만 출력한다."
+    system_instruction = read_description("project_data_카카오싱크.txt")
+    full_content_truncated = truncate_text(system_instruction, max_tokens=1000)
 
+    # print(full_content_truncated)
     # messages를만들고
     # fewshot_messages = build_fewshot(src_lang=src_lang, trg_lang=trg_lang)
 
-    messages = [
-        # {"role": "system", "content": system_instruction},
-                # *fewshot_messages,
-                {"role": "user", "content": text}
-                ]
+    # messages = [
+    #             {"role": "system", "content": system_instruction},
+    #             # *fewshot_messages,
+    #             {"role": "user", "content": text}
+    #             ]
 
+    llm = OpenAI(temperature=0)
+
+    prompt = PromptTemplate(
+    #         input_variables=["season"],
+    # template="{season}에 가면 좋을 여행지 3곳 추천해줘"
+        input_variables=["text"],
+        template=f"""
+        {full_content_truncated}
+        ---
+        위 내용 바탕으로 {{text}}
+        """
+    )
+
+    chain = LLMChain(llm=llm, prompt=prompt)
     # API 호출
-    response = openai.ChatCompletion.create(model="gpt-3.5-turbo",
-                                            messages=messages)
-    print(response)
-    translated_text = response['choices'][0]['message']['content']
+    # response = openai.ChatCompletion.create(model="gpt-3.5-turbo",
+    #                                         messages=messages)
+    # print(response)
+    # translated_text = response['choices'][0]['message']['content']
     # Return
-    return translated_text
+    # return translated_text
+    return chain.run(text)
 
 
 class Message(Base):
@@ -92,7 +126,7 @@ class State(pc.State):
     
     def speaker_change(self, speaker: str):
         self.speaker = speaker
-    
+
     def post(self):
         self.messages = [
             Message(
@@ -101,25 +135,25 @@ class State(pc.State):
                 created_at=datetime.now().strftime("%B %d, %Y %I:%M %p"),
                 # to_lang=self.trg_lang,
             )
-        ] + self.messages
+        ]
+        print("POST", self.text)
+        self.output()
 
-    @pc.var
+    # @pc.var
     def output(self) -> str:
+        if not self.text:
+            return "no text"
         if not self.text.strip():
             return "Translations will appear here."
-        translated = translate_text_using_chatgpt(
-            self.text)#, src_lang=self.src_lang, trg_lang=self.trg_lang)
-        
-        print(translated)
-
-        self.messages = [
+        translated = translate_text_using_chatgpt(self.text)
+        print("TRANS", translated)
+        self.messages = self.messages + [
             Message(
                 speaker="bot",
                 original_text=translated,
                 created_at=datetime.now().strftime("%Y %d %I:%M %p"),
-                # to_lang=self.trg_lang,
             )
-        ] + self.messages
+        ]
         
         # return translated
 
@@ -193,28 +227,27 @@ def smallcaps(text, **kwargs):
     )
 
 
-def output():
-    return pc.box(
-        pc.box(
-            smallcaps(
-                "Output",
-                color="#aeaeaf",
-                background_color="white",
-                padding_x="0.1rem",
-            ),
-            position="absolute",
-            top="-0.5rem",
-        ),
-        # pc.text(State.output),
-        padding="1rem",
-        border="1px solid #eaeaef",
-        margin_top="1rem",
-        border_radius="8px",
-        position="relative",
-    )
+# def output():
+#     return pc.box(
+#         pc.box(
+#             smallcaps(
+#                 "Output",
+#                 color="#aeaeaf",
+#                 background_color="white",
+#                 padding_x="0.1rem",
+#             ),
+#             position="absolute",
+#             top="-0.5rem",
+#         ),
+#         # pc.text(State.output),
+#         padding="1rem",
+#         border="1px solid #eaeaef",
+#         margin_top="1rem",
+#         border_radius="8px",
+#         position="relative",
+#     )
 
 
-# project_data = open("project_data_카카오싱크.txt", "r").read().replace("\n","")
 
 def index():
     """The main view."""
@@ -224,7 +257,7 @@ def index():
             pc.vstack(
                 pc.foreach(
                     State.messages,
-                    lambda m: pc.text(m.created_at, "  [", m.speaker, "] ", m.original_text),
+                    lambda m: pc.text(m.created_at, "  [", m.speaker, "] ", m.original_text, "\n"),
                 ),
                 width="100rem",
                 margin_right="1rem",
