@@ -67,8 +67,8 @@ def translate_text_using_chatgpt(text) -> str:#, src_lang, trg_lang) -> str:
 
 
 class Message(Base):
+    speaker: str=""
     original_text: str
-    text: str
     created_at: str
     # to_lang: str
 
@@ -76,29 +76,54 @@ class Message(Base):
 class State(pc.State):
     """The app state."""
 
+    speaker: str=""
+    speakers: list[str] = []
     text: str = ""
     messages: list[Message] = []
     # src_lang: str = "한국어"
     # trg_lang: str = "영어"
+    # project_data: str=""
+
+    # def __init__(self):
+    #     self.project_data = open("project_data_카카오싱크.txt", "r").read().replace("\n","")
+
+    def set_speaker(self, speakers: list[str]):
+        self.speakers = speakers
+    
+    def speaker_change(self, speaker: str):
+        self.speaker = speaker
+    
+    def post(self):
+        self.messages = [
+            Message(
+                speaker="my",
+                original_text=self.text,
+                created_at=datetime.now().strftime("%B %d, %Y %I:%M %p"),
+                # to_lang=self.trg_lang,
+            )
+        ] + self.messages
 
     @pc.var
     def output(self) -> str:
         if not self.text.strip():
             return "Translations will appear here."
-        print(self.text)
         translated = translate_text_using_chatgpt(
             self.text)#, src_lang=self.src_lang, trg_lang=self.trg_lang)
-        return translated
+        
+        print(translated)
 
-    def post(self):
         self.messages = [
             Message(
-                original_text=self.text,
-                text=self.output,
-                created_at=datetime.now().strftime("%B %d, %Y %I:%M %p"),
+                speaker="bot",
+                original_text=translated,
+                created_at=datetime.now().strftime("%Y %d %I:%M %p"),
                 # to_lang=self.trg_lang,
             )
         ] + self.messages
+        
+        # return translated
+
+
 
 
 # Define views.
@@ -109,7 +134,7 @@ def header():
     return pc.box(
         pc.text("GPT Prompt 🗺", font_size="2rem"),
         pc.text(
-            "Translate things and post them as messages!",
+            "Ask to GPT!",
             margin_top="0.5rem",
             color="#666",
         ),
@@ -180,7 +205,7 @@ def output():
             position="absolute",
             top="-0.5rem",
         ),
-        pc.text(State.output),
+        # pc.text(State.output),
         padding="1rem",
         border="1px solid #eaeaef",
         margin_top="1rem",
@@ -189,40 +214,38 @@ def output():
     )
 
 
+# project_data = open("project_data_카카오싱크.txt", "r").read().replace("\n","")
+
 def index():
     """The main view."""
     return pc.container(
         header(),
-        pc.input(
-            placeholder="Ask to GPT",
-            on_blur=State.set_text,
-            margin_top="1rem",
-            border_color="#eaeaef"
+        pc.hstack(
+            pc.vstack(
+                pc.foreach(
+                    State.messages,
+                    lambda m: pc.text(m.created_at, "  [", m.speaker, "] ", m.original_text),
+                ),
+                width="100rem",
+                margin_right="1rem",
+                align_items="left"
+            ),
+            pc.vstack(
+                pc.input(
+                        placeholder="Ask to GPT",
+                        on_blur=State.set_text,
+                        margin_top="1rem",
+                        border_color="#eaeaef",
+                        width="20rem",
+                        align_items="left"
+                    ),
+                    pc.button("Post", on_click=State.post, margin_top="1rem")
+                ),
         ),
-        # pc.select(
-        #     list(parallel_example.keys()),
-        #     value=State.src_lang,
-        #     placeholder="Select a language",
-        #     on_change=State.set_src_lang,
-        #     margin_top="1rem",
-        # ),
-        # pc.select(
-        #     list(parallel_example.keys()),
-        #     value=State.trg_lang,
-        #     placeholder="Select a language",
-        #     on_change=State.set_trg_lang,
-        #     margin_top="1rem",
-        # ),
-        output(),
-        pc.button("Post", on_click=State.post, margin_top="1rem"),
-        pc.vstack(
-            pc.foreach(State.messages, message),
-            margin_top="2rem",
-            spacing="1rem",
-            align_items="left"
-        ),
+        # width="100rem",
+        aligh_items="left",
         padding="2rem",
-        max_width="600px"
+        max_width="1000px"
     )
 
 
