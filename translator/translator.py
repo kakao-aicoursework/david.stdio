@@ -9,36 +9,50 @@ import tiktoken
 import pynecone as pc
 from pynecone.base import Base
 from langchain.llms import OpenAI
-from langchain.prompts import PromptTemplate
+
 from langchain.chains import LLMChain
+from langchain.chat_models import ChatOpenAI
+from langchain.prompts.chat import ChatPromptTemplate
+
+
+from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain.text_splitter import CharacterTextSplitter
+from langchain.vectorstores import Chroma
+
+
+from langchain.memory import ConversationBufferMemory, FileChatMessageHistory
+
+import translator.uploader as uld
+
 
 # openai.api_key = "<YOUR_OPENAI_API_KEY>"
 import os
+
+
+PWD = os.getcwd()
+HISTORY_DIR = os.path.join(PWD, "./chat_histories/")
+CHROMA_PERSIST_DIR = os.path.join(PWD, "upload/chroma-persist")
+CHROMA_COLLECTION_NAME = "dosu-bot"
+
 os.environ["OPENAI_API_KEY"] = open(".key", "r").read().replace("\n","")
 
 
-# parallel_example = {
-#     "한국어": ["오늘 날씨 어때", "딥러닝 기반의 AI기술이 인기를끌고 있다."],
-#     "영어": ["How is the weather today", "Deep learning-based AI technology is gaining popularity."],
-#     "일본어": ["今日の天気はどうですか", "ディープラーニングベースのAIテクノロジーが人気を集めています。"]
-# }
 
-
-# def translate_text_using_text_davinci(text, src_lang, trg_lang) -> str:
-#     response = openai.Completion.create(engine="text-davinci-003",
-#                                         prompt=f"Translate the following {src_lang} text to {trg_lang}: {text}",
-#                                         max_tokens=200,
-#                                         n=1,
-#                                         temperature=1
-#                                         )
-#     translated_text = response.choices[0].text.strip()
-#     return translated_text
-
-def read_description(file_path: str) -> str:
+def read_prompt_template(file_path: str) -> str:
     with open(file_path, "r") as f:
-        desc = f.read()
+        prompt_template = f.read()
 
-    return desc
+    return prompt_template
+
+def create_chain(llm, template_path, output_key):
+    return LLMChain(
+        llm=llm,
+        prompt=ChatPromptTemplate.from_template(
+            template=read_prompt_template(template_path)
+        ),
+        output_key=output_key,
+        verbose=True,
+    )
 
 def truncate_text(text, max_tokens=3000):
     enc = tiktoken.encoding_for_model("gpt-3.5-turbo")
@@ -63,7 +77,7 @@ def translate_text_using_chatgpt(text) -> str:#, src_lang, trg_lang) -> str:
     #     return fewshot_messages
 
     # system instruction 만들고
-    system_instruction = read_description("project_data_카카오싱크.txt")
+    system_instruction = read_prompt_template("project_data_카카오싱크.txt")
     full_content_truncated = truncate_text(system_instruction, max_tokens=1000)
 
     # print(full_content_truncated)
@@ -76,18 +90,36 @@ def translate_text_using_chatgpt(text) -> str:#, src_lang, trg_lang) -> str:
     #             {"role": "user", "content": text}
     #             ]
 
-    llm = OpenAI(temperature=0)
+    llm = ChatOpenAI(temperature=0, max_tokens=1024)
 
-    prompt = PromptTemplate(
+    prompt = ChatPromptTemplate(
     #         input_variables=["season"],
     # template="{season}에 가면 좋을 여행지 3곳 추천해줘"
         input_variables=["text"],
         template=f"""
         {full_content_truncated}
         ---
-        위 내용 바탕으로 {{text}}
+            위 내용 바탕으로 {{text}}
         """
     )
+def upload_embedding_from_file(file_path):
+    loader = TextLoader.get(file_path)
+    if loader is None:
+        raise ValueError("Not supported file type")
+    documents = loader(file_path).load()
+
+    text_splitter = CharacterTextSplitter(chunk_size=500, chunk_overlap=100)
+    docs = text_splitter.split_documents(documents)
+    print(docs, end='\n\n\n')
+
+    Chroma.from_documents(
+        docs,
+        OpenAIEmbeddings(),
+        collection_name=CHROMA_COLLECTION_NAME,
+        persist_directory=CHROMA_PERSIST_DIR,
+    )
+    print('db success')
+
 
     chain = LLMChain(llm=llm, prompt=prompt)
     # API 호출
@@ -130,7 +162,7 @@ class State(pc.State):
     def post(self):
         self.messages = [
             Message(
-                speaker="my",
+                speaker="👨🏻‍💻",
                 original_text=self.text,
                 created_at=datetime.now().strftime("%B %d, %Y %I:%M %p"),
                 # to_lang=self.trg_lang,
@@ -145,19 +177,17 @@ class State(pc.State):
             return "no text"
         if not self.text.strip():
             return "Translations will appear here."
-        translated = translate_text_using_chatgpt(self.text)
+        translated = gernerate_answer(self.text)#translate_text_using_chatgpt(self.text)
         print("TRANS", translated)
         self.messages = self.messages + [
             Message(
-                speaker="bot",
+                speaker="🤖",
                 original_text=translated,
                 created_at=datetime.now().strftime("%Y %d %I:%M %p"),
             )
         ]
         
         # return translated
-
-
 
 
 # Define views.
@@ -247,9 +277,88 @@ def smallcaps(text, **kwargs):
 #         position="relative",
 #     )
 
+#####
+
+
+def load_conversation_history(conversation_id: str):
+    file_path = os.path.join(HISTORY_DIR, f"{conversation_id}.json")
+    return FileChatMessageHistory(file_path)
+
+
+def log_user_message(history: FileChatMessageHistory, user_message: str):
+    history.add_user_message(user_message)
+
+
+def log_bot_message(history: FileChatMessageHistory, bot_message: str):
+    history.add_ai_message(bot_message)
+
+
+def get_chat_history(conversation_id: str):
+    history = load_conversation_history(conversation_id)
+    memory = ConversationBufferMemory(
+        memory_key="chat_history",
+        input_key="user_message",
+        chat_memory=history,
+    )
+
+    return memory.buffer
+
+#####
+
+_db = Chroma(
+    persist_directory= CHROMA_PERSIST_DIR,
+    embedding_function=OpenAIEmbeddings(),
+    collection_name=CHROMA_COLLECTION_NAME,
+)
+
+_retriever = _db.as_retriever()
+
+def query_db(query: str, use_retriever: bool = False) -> list[str]:
+    if use_retriever:
+        docs = _retriever.get_relevant_documents(query)
+    else:
+        docs = _db.similarity_search(query)
+
+    str_docs = [doc.page_content for doc in docs]
+    return str_docs
+    
+def gernerate_answer(user_message, conversation_id: str='mybot') -> dict[str, str]:
+    history_file = load_conversation_history(conversation_id)
+
+    context = dict(user_message=user_message)
+    context["input"] = context["user_message"]
+    context["intent_list"] = read_prompt_template(INTENT_LIST_TXT)
+    context["chat_history"] = get_chat_history(conversation_id)
+
+    # intent = parse_intent_chain(context)["intent"]
+    intent = parse_intent_chain.run(context)
+
+    if intent == "bug":
+        context["related_documents"] = query_db(context["user_message"])
+
+        answer = ""
+        for step in [bug_step1_chain, bug_step2_chain]:
+            context = step(context)
+            answer += context[step.output_key]
+            answer += "\n\n"
+    elif intent == "enhancement":
+        answer = enhance_step1_chain.run(context)
+    else:
+        context["related_documents"] = query_db(context["user_message"])
+        context["compressed_web_search_results"] = query_web_search(
+            context["user_message"]
+        )
+        answer = default_chain.run(context)
+
+    log_user_message(history_file, user_message)
+    log_bot_message(history_file, answer)
+    return {"answer": answer}
 
 
 def index():
+    if not os.path.exists(CHROMA_PERSIST_DIR):
+        uld.load()
+
     """The main view."""
     return pc.container(
         header(),
@@ -257,7 +366,7 @@ def index():
             pc.vstack(
                 pc.foreach(
                     State.messages,
-                    lambda m: pc.text(m.created_at, "  [", m.speaker, "] ", m.original_text, "\n"),
+                    lambda m: pc.text(m.created_at," ", m.speaker, " ", m.original_text, "\n"),
                 ),
                 width="100rem",
                 margin_right="1rem",

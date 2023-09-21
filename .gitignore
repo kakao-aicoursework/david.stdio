@@ -1,12 +1,7 @@
-
 pynecone.db
-
 __pycache__/
-
 *.py[cod]
-
 .web
-
 .key
-
-
+chat_histories/*
+upload/*
