@@ -1,0 +1,9 @@
+Your job is to read the <message>, Answer question with <context> and summarize the answer.
+
+    <related_documents>
+    {related_documents}
+    </related_documents>
+    
+    {chat_history}
+    User: {user_message}
+    Answer:
