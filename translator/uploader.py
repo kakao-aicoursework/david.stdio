@@ -12,12 +12,14 @@ CHROMA_PERSIST_DIR = os.path.join(PWD, "upload/chroma-persist")
 CHROMA_COLLECTION_NAME = "dosu-bot"
 
 
-def upload_embedding_from_file(loader):
+def upload_embedding_from_file(loader, label):
+    #add labels for each document
     documents = TextLoader(loader).load()
 
-    text_splitter = CharacterTextSplitter(chunk_size=500, chunk_overlap=100)
+    text_splitter = CharacterTextSplitter(separator="\n#", chunk_size=500, chunk_overlap=100) # devide by meanings
     docs = text_splitter.split_documents(documents)
-    print(docs, end='\n\n\n')
+    for doc in docs:
+        doc.page_content = f"Title: {label}\n{doc.page_content}"
 
     Chroma.from_documents(
         docs,
@@ -31,8 +33,10 @@ def load():
     files = ["project_data_카카오소셜.txt", "project_data_카카오싱크.txt","project_data_카카오톡채널.txt"]
     for file in files:
         file_path =  os.path.join(PWD, file)
+        label = file.replace(".txt","").split("_")[2]
+
         try:
-            upload_embedding_from_file(file_path)
+            upload_embedding_from_file(file_path, label)
             print("SUCCESS: ", file_path)
         except Exception as e:
             print("FAILED: ", file_path + f" by({e})")    

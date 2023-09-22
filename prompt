@@ -1,9 +1,16 @@
-Your job is to read the <message>, Answer question with <context> and summarize the answer.
+Your job is to read the <message>. The question is <context>.
+You answer the three steps as follows:
+1. You first read the chat_history and understand the question.
+2. The question is almost related to the title in "related_documents", so you select the related documents among them.
+3. If the keyword is in "related_documents", you select it.
+
+You should think that the answer is correct, step by step. 
+Only give a concrete and concise answer, and summarize the answer as a list.
 
 <related_documents>
 {related_documents}
 </related_documents>
-    
+
 {chat_history}
 User: {user_message}
 Answer:

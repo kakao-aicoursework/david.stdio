@@ -55,63 +55,11 @@ def create_chain(llm, template_path, output_key):
     )
 
 def truncate_text(text, max_tokens=3000):
-    enc = tiktoken.encoding_for_model("gpt-3.5-turbo")
+    enc = tiktoken.encoding_for_model("gpt-3.5-turbo-16k")
     tokens = enc.encode(text)
     if len(tokens) <= max_tokens:  # 토큰 수가 이미 3000 이하라면 전체 텍스트 반환
         return text
     return enc.decode(tokens[:max_tokens])
-
-
-def translate_text_using_chatgpt(text) -> str:#, src_lang, trg_lang) -> str:
-    # fewshot 예제를 만들고
-    # def build_fewshot(src_lang, trg_lang):
-    #     src_examples = parallel_example[src_lang]
-    #     trg_examples = parallel_example[trg_lang]
-
-    #     fewshot_messages = []
-
-    #     for src_text, trg_text in zip(src_examples, trg_examples):
-    #         fewshot_messages.append({"role": "user", "content": src_text})
-    #         fewshot_messages.append({"role": "assistant", "content": trg_text})
-
-    #     return fewshot_messages
-
-    # system instruction 만들고
-    system_instruction = read_prompt_template("project_data_카카오싱크.txt")
-    full_content_truncated = truncate_text(system_instruction, max_tokens=1000)
-
-    # print(full_content_truncated)
-    # messages를만들고
-    # fewshot_messages = build_fewshot(src_lang=src_lang, trg_lang=trg_lang)
-
-    # messages = [
-    #             {"role": "system", "content": system_instruction},
-    #             # *fewshot_messages,
-    #             {"role": "user", "content": text}
-    #             ]
-
-    llm = ChatOpenAI(temperature=0, max_tokens=1024)
-
-    prompt = ChatPromptTemplate(
-    #         input_variables=["season"],
-    # template="{season}에 가면 좋을 여행지 3곳 추천해줘"
-        input_variables=["text"],
-        template=f"""
-        {full_content_truncated}
-        ---
-            위 내용 바탕으로 {{text}}
-        """
-    )
-
-    chain = LLMChain(llm=llm, prompt=prompt)
-    # API 호출
-    # response = openai.ChatCompletion.create(model="gpt-3.5-turbo",
-    #                                         messages=messages)
-    # print(response)
-    # translated_text = response['choices'][0]['message']['content']
-    # Return
-    # return translated_text
-    return chain.run(text)
 
 
 class Message(Base):
@@ -165,7 +113,7 @@ class State(pc.State):
                 original_text=translated,
                 created_at=datetime.now().strftime("%Y %d %I:%M %p\n"),
             )
-        ]
+        ] 
         
         # return translated
 
@@ -303,19 +251,14 @@ def query_db(query: str, use_retriever: bool = False) -> list[str]:
     return str_docs
 
 def gernerate_answer(user_message, conversation_id: str='mybot') -> str:
-    llm = ChatOpenAI(temperature=0, max_tokens=1024)
-
-    # parse_intent_chain = create_chain(
-    #     llm=llm,
-    #     template_path=INTENT_PROMPT_TEMPLATE,
-    #     output_key="intent",
-    # )
+    llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-16k")
     
     prompt=os.path.join(PWD, "prompt")
     parse_intent_chain = LLMChain(llm=llm, prompt=
             ChatPromptTemplate.from_template(
-            template=read_prompt_template(prompt)
+            template=truncate_text(read_prompt_template(prompt))
         ))
+
 
     history_file = load_conversation_history(conversation_id)
     context = dict(user_message=user_message)
@@ -348,9 +291,22 @@ def gernerate_answer(user_message, conversation_id: str='mybot') -> str:
     log_user_message(history_file, user_message)
     log_bot_message(history_file, answer)
     return answer
-
+        
+def message(message: Message):
+    return pc.box(
+        pc.vstack(
+            pc.text(message.created_at, " ", message.speaker),
+            pc.text_area(value=message.original_text),
+            spacing="1rem",
+            position="relative",
+            align_items="left"
+            )
+    )
 
 def index():
+    if os.path.exists(f"{HISTORY_DIR}/mybot.json"):
+        os.remove(f"{HISTORY_DIR}/mybot.json")
+    
     if not os.path.exists(CHROMA_PERSIST_DIR):
         uld.load()
 
@@ -361,7 +317,7 @@ def index():
             pc.vstack(
                 pc.foreach(
                     State.messages,
-                    lambda m: pc.text(m.created_at , " ", m.speaker, " ", m.original_text, " "),
+                    lambda m: message(m),
                 ),
                 width="100rem",
                 margin_right="1rem",
