@@ -102,24 +102,6 @@ def translate_text_using_chatgpt(text) -> str:#, src_lang, trg_lang) -> str:
             위 내용 바탕으로 {{text}}
         """
     )
-def upload_embedding_from_file(file_path):
-    loader = TextLoader.get(file_path)
-    if loader is None:
-        raise ValueError("Not supported file type")
-    documents = loader(file_path).load()
-
-    text_splitter = CharacterTextSplitter(chunk_size=500, chunk_overlap=100)
-    docs = text_splitter.split_documents(documents)
-    print(docs, end='\n\n\n')
-
-    Chroma.from_documents(
-        docs,
-        OpenAIEmbeddings(),
-        collection_name=CHROMA_COLLECTION_NAME,
-        persist_directory=CHROMA_PERSIST_DIR,
-    )
-    print('db success')
-
 
     chain = LLMChain(llm=llm, prompt=prompt)
     # API 호출
@@ -160,15 +142,14 @@ class State(pc.State):
         self.speaker = speaker
 
     def post(self):
-        self.messages = [
+        self.messages = self.messages + [
             Message(
                 speaker="👨🏻‍💻",
                 original_text=self.text,
-                created_at=datetime.now().strftime("%B %d, %Y %I:%M %p"),
+                created_at=datetime.now().strftime("%Y %d %I:%M %p\n"),
                 # to_lang=self.trg_lang,
             )
         ]
-        print("POST", self.text)
         self.output()
 
     # @pc.var
@@ -178,12 +159,11 @@ class State(pc.State):
         if not self.text.strip():
             return "Translations will appear here."
         translated = gernerate_answer(self.text)#translate_text_using_chatgpt(self.text)
-        print("TRANS", translated)
         self.messages = self.messages + [
             Message(
                 speaker="🤖",
                 original_text=translated,
-                created_at=datetime.now().strftime("%Y %d %I:%M %p"),
+                created_at=datetime.now().strftime("%Y %d %I:%M %p\n"),
             )
         ]
         
@@ -321,38 +301,53 @@ def query_db(query: str, use_retriever: bool = False) -> list[str]:
 
     str_docs = [doc.page_content for doc in docs]
     return str_docs
-    
-def gernerate_answer(user_message, conversation_id: str='mybot') -> dict[str, str]:
-    history_file = load_conversation_history(conversation_id)
 
+def gernerate_answer(user_message, conversation_id: str='mybot') -> str:
+    llm = ChatOpenAI(temperature=0, max_tokens=1024)
+
+    # parse_intent_chain = create_chain(
+    #     llm=llm,
+    #     template_path=INTENT_PROMPT_TEMPLATE,
+    #     output_key="intent",
+    # )
+    
+    prompt=os.path.join(PWD, "prompt")
+    parse_intent_chain = LLMChain(llm=llm, prompt=
+            ChatPromptTemplate.from_template(
+            template=read_prompt_template(prompt)
+        ))
+
+    history_file = load_conversation_history(conversation_id)
     context = dict(user_message=user_message)
     context["input"] = context["user_message"]
-    context["intent_list"] = read_prompt_template(INTENT_LIST_TXT)
+
+    context["related_documents"] = query_db(context["user_message"])
     context["chat_history"] = get_chat_history(conversation_id)
 
     # intent = parse_intent_chain(context)["intent"]
-    intent = parse_intent_chain.run(context)
+    answer = parse_intent_chain.run(context)
 
-    if intent == "bug":
-        context["related_documents"] = query_db(context["user_message"])
 
-        answer = ""
-        for step in [bug_step1_chain, bug_step2_chain]:
-            context = step(context)
-            answer += context[step.output_key]
-            answer += "\n\n"
-    elif intent == "enhancement":
-        answer = enhance_step1_chain.run(context)
-    else:
-        context["related_documents"] = query_db(context["user_message"])
-        context["compressed_web_search_results"] = query_web_search(
-            context["user_message"]
-        )
-        answer = default_chain.run(context)
+    # if intent == "bug":
+    #     context["related_documents"] = query_db(context["user_message"])
+
+    #     answer = ""
+    #     for step in [bug_step1_chain, bug_step2_chain]:
+    #         context = step(context)
+    #         answer += context[step.output_key]
+    #         answer += "\n\n"
+    # elif intent == "enhancement":
+    #     answer = enhance_step1_chain.run(context)
+    # else:
+    #     context["related_documents"] = query_db(context["user_message"])
+    #     context["compressed_web_search_results"] = query_web_search(
+    #         context["user_message"]
+    #     )
+    #     answer = default_chain.run(context)
 
     log_user_message(history_file, user_message)
     log_bot_message(history_file, answer)
-    return {"answer": answer}
+    return answer
 
 
 def index():
@@ -366,7 +361,7 @@ def index():
             pc.vstack(
                 pc.foreach(
                     State.messages,
-                    lambda m: pc.text(m.created_at," ", m.speaker, " ", m.original_text, "\n"),
+                    lambda m: pc.text(m.created_at , " ", m.speaker, " ", m.original_text, " "),
                 ),
                 width="100rem",
                 margin_right="1rem",
