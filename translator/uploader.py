@@ -16,14 +16,14 @@ def upload_embedding_from_file(loader, label):
     #add labels for each document
     documents = TextLoader(loader).load()
 
-    text_splitter = CharacterTextSplitter(separator="\n#", chunk_size=500, chunk_overlap=100) # devide by meanings
+    text_splitter = CharacterTextSplitter(separator="\n#", chunk_size=500, chunk_overlap=100) # divide by meanings
     docs = text_splitter.split_documents(documents)
     for doc in docs:
-        doc.page_content = f"Title: {label}\n{doc.page_content}"
+        doc.page_content = f"Title: {label}\n{doc.page_content}" # preprocessing for each document
 
     Chroma.from_documents(
         docs,
-        OpenAIEmbeddings(),
+        OpenAIEmbeddings(), 
         collection_name=CHROMA_COLLECTION_NAME,
         persist_directory=CHROMA_PERSIST_DIR,
     )
